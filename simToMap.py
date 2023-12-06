@@ -23,7 +23,7 @@ def generate_map(flat_cloud, size, resolution):
             isY = np.logical_and(flat_cloud[:,1] >= minY, flat_cloud[:,1] <maxY)
             if (np.any(np.logical_and(isX, isY))):
                 map[x][y] = 1
-    map = np.flip(map, axis=1)
-    map = np.rot90(map)
+    # map = np.flip(map, axis=1)
+    # map = np.rot90(map)
     return map
 
