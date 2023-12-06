@@ -1,139 +1,204 @@
-import heapq
+from queue import PriorityQueue
+import numpy as np
 
-# State class
-# - Represents a state in the algorithm
-# - Each state has a coordinate and an associated cost (default is infinity)
-class State:
-    def __init__(self, index, cost = float('inf')):
-        self.index = index
-        self.cost = cost
-
-    def __lt__(self, other):
-        return self.cost < other.cost
-
-# DStarLite Class
-# - Initialize the D* Lite Algoritm
-# - W/ start state, goal state, & binary array (environment)
 class DStarLite:
-    def __init__(self, start, goal, binary_array):
+    def __init__(self, start, goal, grid):
         self.start = start
         self.goal = goal
-        self.binary_array = binary_array
-        self.rows, self.cols = len(binary_array), len(binary_array[0])
-        # Priority queue that manages states based on their costs
-        self.open_list = [start]
+        self.grid = grid
+        # Initialize other necessary variables here
 
-    # Helper Method
-    # checks to see if position @ (x, y) is unoccupied
-    def is_valid(self, x, y):
-        return 0 <= x < self.rows and 0 <= y < self.cols and self.binary_array[x][y] == 0
+    def getNeighbors(self, current):
+        x, y = current
+        # Define the logic to get neighbors based on your grid
+        # Example: getting 4-connectivity neighbors
+        neighbors = [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)]
+        valid_neighbors = []
 
-    # Method to update the binary array
-    def update_binary_array(self, x, y, value):
-        if 0 <= x < self.rows and 0 <= y < self.cols: # Check that the coordinates are within range
-            self.binary_array[x][y] = value
+        for neighbor in neighbors:
+            neighbor_x, neighbor_y = neighbor
+            # Check if the neighbor is within the grid boundaries
+            if 0 <= neighbor_x < len(self.grid) and 0 <= neighbor_y < len(self.grid[0]):
+                # Check if the neighbor is accessible (you might have specific criteria)
+                if self.grid[neighbor_x][neighbor_y] == 0:  # Change this condition as needed
+                    valid_neighbors.append(neighbor)
+
+        return valid_neighbors
+
+    def heuristic(self, cell):
+        # Implement your heuristic function here
+        # Example: Euclidean distance heuristic
+        start_x, start_y = self.start
+        goal_x, goal_y = self.goal
+        cell_x, cell_y = cell
+
+        # Calculate Euclidean distance as heuristic
+        heuristic_cost = ((goal_x - cell_x) ** 2 + (goal_y - cell_y) ** 2) ** 0.5
+
+        return heuristic_cost
+
+    def remove(self, current):
+        # Flag a cell as removed in the grid (assuming grid is a list of lists)
+        x, y = current
+        if 0 <= x < len(self.grid) and 0 <= y < len(self.grid[0]):
+            self.grid[x][y] = 1  # Modify the value according to your grid representation to indicate removed cell
         else:
-            print("Error: Attempted to update binary array outside of bounds.")
+            print("Cell coordinates out of range")
 
-    # Update the cost of a given state
-    def update_cost(self, state, new_cost):
-        # Comparison w/ new cost
-        if new_cost < state.cost:
-            state.cost = new_cost
+    def cost(self, current, neighbor):
+        # Example: Euclidean distance as the cost function
+        current_x, current_y = current
+        neighbor_x, neighbor_y = neighbor
 
-            # If the state is in the open list, delete the old data
-            # Push the new data
-            if state in self.open_list:
-                self.open_list.remove(state)
-                heapq.heappush(self.open_list, state)
-
-    # Cost_to_move
-    def cost_to_move (self, current_state, neighbor_state):
-        # Extract indices (x, y) for the current and neighbor state
-        current_x, current_y = current_state.index
-        neighbor_x, neighbor_y = neighbor_state.index
-
-        # Calculate Euclidean distance as a simple cost measure
-        distance = ((current_x - neighbor_x) **2 + (current_y - neighbor_y) **2) **0.5
-
-        # Additional penalty for proximity to obstacle
-        proximity_penalty = 0.1 
-
-        # Check if neighbor is close to an obstacle
-        if self.binary_array[neighbor_x][neighbor_y] == 1:
-            distance += proximity_penalty
-
-        # Assume a cost of 1 per unit distance
-        cost = distance
+        # Euclidean distance as the cost (you can use other methods based on your needs)
+        cost = ((neighbor_x - current_x) ** 2 + (neighbor_y - current_y) ** 2) ** 0.5
 
         return cost
-        
-    # Propagate cost changes to neighbors 
-    def propagate(self, state):
-        # Propagate cost changes to neighbors
-        x, y = state.index
 
-        # Determine if LiDAR data is valid neighbors
-        valid_neighbors = []
-        for dx in range(-1, 2):
-            for dy in range(-1, 2):
-                if dx == 0 and dy == 0:
-                    continue # Skip the current state
-                
-                neighbor_x, neighbor_y = x + dx, y + dy
+    def computeShortestPath(self):
+        # Initialize open list with the start cell
+        open_list = PriorityQueue()
+        open_list.put(self.start, 0)
 
-                # Check if the neighbor is within the bounds and is valid based on LiDAR data
-                if 0 <= neighbor_x <self.rows and 0 <= neighbor_y < self.cols and self.is_valid(neighbor_x, neighbor_y):
-                    neighbor_state = State(index=(neighbor_x, neighbor_y))
-                    new_cost = state.cost + self.cost_to_move(state, neighbor_state)
+        # Initialize cost and backpointer dictionaries
+        g_values = {self.start: 0}
+        rhs_values = {self.start: self.heuristic(self.start)}
+        backpointers = {}
+        removed = set()  # Set to keep track of removed elements
 
-                    self.update_cost(neighbor_state, new_cost)
+        while not open_list.empty():
+            # Get the cell in open list with the lowest rhs value
+            current = open_list.get()
 
-    # Main loop of algorithm
-    # - Extracts the state w/ the lowest cost from priority queue
-    # - Continues until the goal state is reached or no more paths can be improved
-    def replan(self):
-        # Main loop
-        while self.open_list:
-            # Extract lowest cost state
-            current_state = heapq.heappop(self.open_list)
+            # If the cell is not yet expanded (i.e., g-value and rhs-value are not equal)
+            if current in removed:
+                continue  # Skip removed elements
 
-            # Break if at goal
-            if current_state.index == self.goal.index:
-                break
+            if g_values[current] > rhs_values[current]:
+                g_values[current] = rhs_values[current]
 
-            # Update cost and propagate information B4 next loop
-            new_cost = current_state.cost + 1
-            self.update_cost(current_state, new_cost)
-            self.propagate(current_state)
+                # Simulate removal by re-adding the element with a higher priority
+                open_list.put(current, rhs_values[current])
 
-    # For backtracking
-    # Determine if next state to move is has the minimum cost
-    def find_minimum_cost_neighbor(self, state):
-        neighbors = [(state.index[0] + 1, state.index[1]),
-                     (state.index[0] - 1, state.index[1]),
-                     (state.index[0], state.index[1] + 1),
-                     (state.index[0], state.index[1] -1)]
+            # For each neighbor of the current cell
+            for neighbor in self.getNeighbors(current):
+                if neighbor not in g_values:
+                    g_values[neighbor] = float('inf')
 
-        valid_neighbors = [neighbor for neighbor in neighbors if self.is_valid(*neighbor)]
+                # If the cost through the current cell is less than the current cost
+                if g_values[neighbor] > g_values[current] + self.cost(current, neighbor):
+                    backpointers[neighbor] = current
+                    rhs_values[neighbor] = g_values[current] + self.cost(current, neighbor)
+                    open_list.put(neighbor, rhs_values[neighbor])
 
-        # Find the neighbor w/ the minimum cost
-        min_cost_neighbor = min(valid_neighbors, key=lambda neighbor: neighbor.cost)
-
-        return State(index = min_cost_neighbor, cost = min_cost_neighbor.cost)
-
-    # Backtracking from the goal state to start state
-    # - To construct final path
-    def extract_path(self):
-        path = [self.start]
-        current_state = self.start
-
-        # Backtrack from the goal to the start to construct path
-        while current_state.index != self.goal.index:
-            next_state = self.find_minimum_cost_neighbor(current_state)
-            path.append(next_state)
-            current_state = next_state
-
+        # Reconstruct the path from the goal to the start
+        path = []
+        current = self.goal
+        while current != self.start:
+            path.append(current)
+            current = backpointers[current]
+        path.append(self.start)  # Optional
+        path.reverse()  # Optional: reverse the path to start-to-goal order
 
         return path
-    
+
+    def getNextInPath(self, current):
+        # Get the neighbors of the current cell
+        neighbors = self.getNeighbors(current)
+
+        # Initialize the next cell as None and the minimum cost as infinity
+        next_cell = None
+        min_cost = float('inf')
+
+        # For each neighbor
+        for neighbor in neighbors:
+            # Calculate the cost from the current cell to the neighbor
+            cost = self.cost(current, neighbor)
+
+            # If the cost is less than the minimum cost, update the next cell and the minimum cost
+            if cost < min_cost:
+                next_cell = neighbor
+                min_cost = cost
+
+        # Return the next cell in the path
+        return next_cell
+
+    def gridHasChanged(self):
+        # Store a copy of the grid at the time of path computation
+        if not hasattr(self, 'old_grid'):
+            self.old_grid = self.grid.copy()
+            return False
+
+        # Check if the grid has changed
+        if np.array_equal(self.grid, self.old_grid):
+            return False
+        else:
+            # Update the old grid to the current grid
+            self.old_grid = self.grid.copy()
+            return True
+
+    def updateGrid(self, grid):
+        # Update the internal representation of the grid
+        self.grid = grid
+
+
+
+def getNeighborsAll(grid, current, q):
+
+    for i in range(current[0]-1, current[0]+2):
+        if not 0 <= i < len(grid): continue #if out of range of grid
+
+        for j in range(current[1]-1, current[1]+2):
+
+            if not 0 <= j < len(grid): continue  # if out of range of grid
+
+            if grid[i][j] == 0 and (i,j) != current: # if passable and untouched
+                grid[i][j] = current # back pointer
+                q.put((i, j))
+
+    return q, grid
+
+def getNeighborsCardinal(grid, current, q):
+    points = [(current[0]-1,current[1]), (current[0]+1,current[1]),
+              (current[0],current[1]-1), (current[0],current[1]+1)]
+    for i,j in points:
+        if not 0 <= i < len(grid): continue #if out of range of grid
+
+        if not 0 <= j < len(grid): continue  # if out of range of grid
+
+        if grid[i][j] == 0 and (i,j) != current: # if passable and untouched
+            grid[i][j] = current # back pointer
+            q.put((i, j))
+
+    return q, grid
+
+
+def dStarLitePath(gridWorld, start, goal):
+    grid = gridWorld
+
+    # Initialize D* Lite
+    dstar = DStarLite(start, goal, grid)
+
+    # Compute initial plan
+    dstar.computeShortestPath()
+
+    path = []
+    current = start
+    while current != goal:
+        # Get next cell in the path
+        current = dstar.getNextInPath(current)
+
+        # If no path is found
+        if current is None:
+            return -1
+
+        # Add current cell to the path
+        path.append(current)
+
+        # If the grid has changed, update the path
+        if dstar.gridHasChanged():
+            dstar.updateGrid(grid)
+            dstar.computeShortestPath()
+
+    return path
+
