@@ -24,6 +24,7 @@ def circle(event):
     myArray.append((x, y))
     canvas.create_oval(x - 5, y - 5, x + 5, y + 5, fill="red")
 
+
 def drawPath():
     global myArray
     global dstar
@@ -31,14 +32,18 @@ def drawPath():
     npArray = np.array(myArray)
     map = stm.generate_map(npArray, 500, RESOLUTION)
 
-
     dstar.replan()
     path = dstar.extract_path()
     print(path)
-    # canvas.create_line()
 
+    # Draw the path on the canvas
+    for i in range(len(path) - 1):
+        x1, y1 = path[i]
+        x2, y2 = path[i + 1]
+        canvas.create_line(x1, y1, x2, y2, fill="blue", width=2)
 
-
+    # Update the canvas
+    canvas.update()
 
 
 window = tk.Tk()
