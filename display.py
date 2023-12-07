@@ -2,13 +2,13 @@ import tkinter as tk
 import numpy as np
 import simToMap as stm
 from time import sleep
-import DStarLite
+from DStarLite import DStarLite
 
 
 RESOLUTION = 25
 myArray = []
 map = np.zeros((25, 25))
-dstar = DStarLite.DStarLite((0,0), (RESOLUTION, RESOLUTION), map)
+dstar = DStarLite(map, robotPos, goalPos)
 robotPos = (0,0)
 goalPos= (RESOLUTION-1, RESOLUTION-1)
 
@@ -63,28 +63,37 @@ def circle(event):
     myArray.append((x, y))
     canvas.create_oval(x - 3, y - 3, x + 3, y + 3, fill="red", tags="point")
 
+
 def runStep(delay=.2):
     global myArray
     npArray = np.array(myArray)
-    if len(myArray) == 0:
-        map = np.zeros((25,25))
-    else: map = stm.generate_map(npArray, 500, RESOLUTION)
 
-    path = DStarLite.dStarLitePath(map.tolist(), robotPos, goalPos)
-    if (path == -1):
-        canvas.coords(pathLine, 0,0,0,0)
+    if len(myArray) == 0:
+        map = np.zeros((25, 25))
+    else:
+        map = stm.generate_map(npArray, 500, RESOLUTION)
+
+    # Compute path using D* Lite algorithm
+    path, g_values, rhs_values = dstar.move_and_replan(robotPos)
+
+    if path == -1:
+        canvas.coords(pathLine, 0, 0, 0, 0)
         return 0
 
-    if (len(path)<=2): # if at goal
+    if len(path) <= 2:  # if at goal
         canvas.coords(pathLine, 0, 0, 0, 0)
         moveBot(goalPos, delay)
         return 0
 
-    canvas.coords(pathLine, pathToLine(path))
-    canvas.update()
-    sleep(delay)
-    moveBot(path[-2], delay)
+    # Display path on canvas and move the robot along the path
+    for new_position in path:
+        moveBot(new_position, delay)
+        canvas.coords(pathLine, pathToLine(path))
+        canvas.update()
+        sleep(delay)
+
     return 1
+
 
 def autoRun():
     while runStep(.1):

@@ -1,204 +1,158 @@
-from queue import PriorityQueue
+from priority_queue import PriorityQueue, Priority
+from grid import OccupancyGridMap
 import numpy as np
+from utils import heuristic, Vertex, Vertices
+from typing import Dict, List
+
+OBSTACLE = 255
+UNOCCUPIED = 0
+
 
 class DStarLite:
-    def __init__(self, start, goal, grid):
-        self.start = start
-        self.goal = goal
-        self.grid = grid
-        # Initialize other necessary variables here
+    def __init__(self, map: OccupancyGridMap, s_start: (int, int), s_goal: (int, int)):
+        """
+        :param map: the ground truth map of the environment provided by gui
+        :param s_start: start location
+        :param s_goal: end location
+        """
+        self.new_edges_and_old_costs = None
 
-    def getNeighbors(self, current):
-        x, y = current
-        # Define the logic to get neighbors based on your grid
-        # Example: getting 4-connectivity neighbors
-        neighbors = [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)]
-        valid_neighbors = []
+        # algorithm start
+        self.s_start = s_start
+        self.s_goal = s_goal
+        self.s_last = s_start
+        self.k_m = 0  # accumulation
+        self.U = PriorityQueue()
+        self.rhs = np.ones((map.x_dim, map.y_dim)) * np.inf
+        self.g = self.rhs.copy()
 
-        for neighbor in neighbors:
-            neighbor_x, neighbor_y = neighbor
-            # Check if the neighbor is within the grid boundaries
-            if 0 <= neighbor_x < len(self.grid) and 0 <= neighbor_y < len(self.grid[0]):
-                # Check if the neighbor is accessible (you might have specific criteria)
-                if self.grid[neighbor_x][neighbor_y] == 0:  # Change this condition as needed
-                    valid_neighbors.append(neighbor)
+        self.sensed_map = OccupancyGridMap(x_dim=map.x_dim,
+                                           y_dim=map.y_dim,
+                                           exploration_setting='8N')
 
-        return valid_neighbors
+        self.rhs[self.s_goal] = 0
+        self.U.insert(self.s_goal, Priority(heuristic(self.s_start, self.s_goal), 0))
 
-    def heuristic(self, cell):
-        # Implement your heuristic function here
-        # Example: Euclidean distance heuristic
-        start_x, start_y = self.start
-        goal_x, goal_y = self.goal
-        cell_x, cell_y = cell
+    def calculate_key(self, s: (int, int)):
+        """
+        :param s: the vertex we want to calculate key
+        :return: Priority class of the two keys
+        """
+        k1 = min(self.g[s], self.rhs[s]) + heuristic(self.s_start, s) + self.k_m
+        k2 = min(self.g[s], self.rhs[s])
+        return Priority(k1, k2)
 
-        # Calculate Euclidean distance as heuristic
-        heuristic_cost = ((goal_x - cell_x) ** 2 + (goal_y - cell_y) ** 2) ** 0.5
-
-        return heuristic_cost
-
-    def remove(self, current):
-        # Flag a cell as removed in the grid (assuming grid is a list of lists)
-        x, y = current
-        if 0 <= x < len(self.grid) and 0 <= y < len(self.grid[0]):
-            self.grid[x][y] = 1  # Modify the value according to your grid representation to indicate removed cell
+    def c(self, u: (int, int), v: (int, int)) -> float:
+        """
+        calcuclate the cost between nodes
+        :param u: from vertex
+        :param v: to vertex
+        :return: euclidean distance to traverse. inf if obstacle in path
+        """
+        if not self.sensed_map.is_unoccupied(u) or not self.sensed_map.is_unoccupied(v):
+            return float('inf')
         else:
-            print("Cell coordinates out of range")
+            return heuristic(u, v)
 
-    def cost(self, current, neighbor):
-        # Example: Euclidean distance as the cost function
-        current_x, current_y = current
-        neighbor_x, neighbor_y = neighbor
+    def contain(self, u: (int, int)) -> (int, int):
+        return u in self.U.vertices_in_heap
 
-        # Euclidean distance as the cost (you can use other methods based on your needs)
-        cost = ((neighbor_x - current_x) ** 2 + (neighbor_y - current_y) ** 2) ** 0.5
+    def update_vertex(self, u: (int, int)):
+        if self.g[u] != self.rhs[u] and self.contain(u):
+            self.U.update(u, self.calculate_key(u))
+        elif self.g[u] != self.rhs[u] and not self.contain(u):
+            self.U.insert(u, self.calculate_key(u))
+        elif self.g[u] == self.rhs[u] and self.contain(u):
+            self.U.remove(u)
 
-        return cost
+    def compute_shortest_path(self):
+        while self.U.top_key() < self.calculate_key(self.s_start) or self.rhs[self.s_start] > self.g[self.s_start]:
+            u = self.U.top()
+            k_old = self.U.top_key()
+            k_new = self.calculate_key(u)
 
-    def computeShortestPath(self):
-        # Initialize open list with the start cell
-        open_list = PriorityQueue()
-        open_list.put(self.start, 0)
+            if k_old < k_new:
+                self.U.update(u, k_new)
+            elif self.g[u] > self.rhs[u]:
+                self.g[u] = self.rhs[u]
+                self.U.remove(u)
+                pred = self.sensed_map.succ(vertex=u)
+                for s in pred:
+                    if s != self.s_goal:
+                        self.rhs[s] = min(self.rhs[s], self.c(s, u) + self.g[u])
+                    self.update_vertex(s)
+            else:
+                self.g_old = self.g[u]
+                self.g[u] = float('inf')
+                pred = self.sensed_map.succ(vertex=u)
+                pred.append(u)
+                for s in pred:
+                    if self.rhs[s] == self.c(s, u) + self.g_old:
+                        if s != self.s_goal:
+                            min_s = float('inf')
+                            succ = self.sensed_map.succ(vertex=s)
+                            for s_ in succ:
+                                temp = self.c(s, s_) + self.g[s_]
+                                if min_s > temp:
+                                    min_s = temp
+                            self.rhs[s] = min_s
+                    self.update_vertex(u)
 
-        # Initialize cost and backpointer dictionaries
-        g_values = {self.start: 0}
-        rhs_values = {self.start: self.heuristic(self.start)}
-        backpointers = {}
-        removed = set()  # Set to keep track of removed elements
+    def rescan(self) -> Vertices:
 
-        while not open_list.empty():
-            # Get the cell in open list with the lowest rhs value
-            current = open_list.get()
+        new_edges_and_old_costs = self.new_edges_and_old_costs
+        self.new_edges_and_old_costs = None
+        return new_edges_and_old_costs
 
-            # If the cell is not yet expanded (i.e., g-value and rhs-value are not equal)
-            if current in removed:
-                continue  # Skip removed elements
+    def move_and_replan(self, robot_position: (int, int)):
+        path = [robot_position]
+        self.s_start = robot_position
+        self.s_last = self.s_start
+        self.compute_shortest_path()
 
-            if g_values[current] > rhs_values[current]:
-                g_values[current] = rhs_values[current]
+        while self.s_start != self.s_goal:
+            assert (self.rhs[self.s_start] != float('inf')), "There is no known path!"
 
-                # Simulate removal by re-adding the element with a higher priority
-                open_list.put(current, rhs_values[current])
+            succ = self.sensed_map.succ(self.s_start, avoid_obstacles=False)
+            min_s = float('inf')
+            arg_min = None
+            for s_ in succ:
+                temp = self.c(self.s_start, s_) + self.g[s_]
+                if temp < min_s:
+                    min_s = temp
+                    arg_min = s_
 
-            # For each neighbor of the current cell
-            for neighbor in self.getNeighbors(current):
-                if neighbor not in g_values:
-                    g_values[neighbor] = float('inf')
+            ### algorithm sometimes gets stuck here for some reason !!! FIX
+            self.s_start = arg_min
+            path.append(self.s_start)
+            # scan graph for changed costs
+            changed_edges_with_old_cost = self.rescan()
+            #print("len path: {}".format(len(path)))
+            # if any edge costs changed
+            if changed_edges_with_old_cost:
+                self.k_m += heuristic(self.s_last, self.s_start)
+                self.s_last = self.s_start
 
-                # If the cost through the current cell is less than the current cost
-                if g_values[neighbor] > g_values[current] + self.cost(current, neighbor):
-                    backpointers[neighbor] = current
-                    rhs_values[neighbor] = g_values[current] + self.cost(current, neighbor)
-                    open_list.put(neighbor, rhs_values[neighbor])
-
-        # Reconstruct the path from the goal to the start
-        path = []
-        current = self.goal
-        while current != self.start:
-            path.append(current)
-            current = backpointers[current]
-        path.append(self.start)  # Optional
-        path.reverse()  # Optional: reverse the path to start-to-goal order
-
-        return path
-
-    def getNextInPath(self, current):
-        # Get the neighbors of the current cell
-        neighbors = self.getNeighbors(current)
-
-        # Initialize the next cell as None and the minimum cost as infinity
-        next_cell = None
-        min_cost = float('inf')
-
-        # For each neighbor
-        for neighbor in neighbors:
-            # Calculate the cost from the current cell to the neighbor
-            cost = self.cost(current, neighbor)
-
-            # If the cost is less than the minimum cost, update the next cell and the minimum cost
-            if cost < min_cost:
-                next_cell = neighbor
-                min_cost = cost
-
-        # Return the next cell in the path
-        return next_cell
-
-    def gridHasChanged(self):
-        # Store a copy of the grid at the time of path computation
-        if not hasattr(self, 'old_grid'):
-            self.old_grid = self.grid.copy()
-            return False
-
-        # Check if the grid has changed
-        if np.array_equal(self.grid, self.old_grid):
-            return False
-        else:
-            # Update the old grid to the current grid
-            self.old_grid = self.grid.copy()
-            return True
-
-    def updateGrid(self, grid):
-        # Update the internal representation of the grid
-        self.grid = grid
-
-
-
-def getNeighborsAll(grid, current, q):
-
-    for i in range(current[0]-1, current[0]+2):
-        if not 0 <= i < len(grid): continue #if out of range of grid
-
-        for j in range(current[1]-1, current[1]+2):
-
-            if not 0 <= j < len(grid): continue  # if out of range of grid
-
-            if grid[i][j] == 0 and (i,j) != current: # if passable and untouched
-                grid[i][j] = current # back pointer
-                q.put((i, j))
-
-    return q, grid
-
-def getNeighborsCardinal(grid, current, q):
-    points = [(current[0]-1,current[1]), (current[0]+1,current[1]),
-              (current[0],current[1]-1), (current[0],current[1]+1)]
-    for i,j in points:
-        if not 0 <= i < len(grid): continue #if out of range of grid
-
-        if not 0 <= j < len(grid): continue  # if out of range of grid
-
-        if grid[i][j] == 0 and (i,j) != current: # if passable and untouched
-            grid[i][j] = current # back pointer
-            q.put((i, j))
-
-    return q, grid
-
-
-def dStarLitePath(gridWorld, start, goal):
-    grid = gridWorld
-
-    # Initialize D* Lite
-    dstar = DStarLite(start, goal, grid)
-
-    # Compute initial plan
-    dstar.computeShortestPath()
-
-    path = []
-    current = start
-    while current != goal:
-        # Get next cell in the path
-        current = dstar.getNextInPath(current)
-
-        # If no path is found
-        if current is None:
-            return -1
-
-        # Add current cell to the path
-        path.append(current)
-
-        # If the grid has changed, update the path
-        if dstar.gridHasChanged():
-            dstar.updateGrid(grid)
-            dstar.computeShortestPath()
-
-    return path
-
+                # for all directed edges (u,v) with changed edge costs
+                vertices = changed_edges_with_old_cost.vertices
+                for vertex in vertices:
+                    v = vertex.pos
+                    succ_v = vertex.edges_and_c_old
+                    for u, c_old in succ_v.items():
+                        c_new = self.c(u, v)
+                        if c_old > c_new:
+                            if u != self.s_goal:
+                                self.rhs[u] = min(self.rhs[u], self.c(u, v) + self.g[v])
+                        elif self.rhs[u] == c_old + self.g[v]:
+                            if u != self.s_goal:
+                                min_s = float('inf')
+                                succ_u = self.sensed_map.succ(vertex=u)
+                                for s_ in succ_u:
+                                    temp = self.c(u, s_) + self.g[s_]
+                                    if min_s > temp:
+                                        min_s = temp
+                                self.rhs[u] = min_s
+                            self.update_vertex(u)
+            self.compute_shortest_path()
+        print("path found!")
+        return path, self.g, self.rhs
